@@ -1,0 +1,1123 @@
+// schema.prisma
+// Política: datas em UTC; conversão para America/Sao_Paulo na aplicação.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * =====================================
+ * Enums
+ * =====================================
+ */
+
+enum UserType {
+  INDIVIDUAL
+  COMPANY
+}
+
+enum PaymentMethod {
+  PIX
+  CREDIT_CARD
+  CRYPTO
+  BOLETO
+  OTHER
+}
+
+enum TransactionType {
+  INCOMING
+  OUTGOING
+}
+
+enum TransactionStatus {
+  PENDING
+  AUTHORIZED
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELED
+  CHARGEBACK
+}
+
+enum Currency {
+  BRL
+  USD
+  EUR
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum AutomationStatus {
+  ENABLED
+  DISABLED
+}
+
+enum AutomationEvent {
+  PIX_CREATED
+  PIX_PAID
+  BALANCE_CHANGED
+  OTHER
+}
+
+enum DeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  RETRYING
+  DEAD_LETTER
+}
+
+enum AdminRole {
+  SUPERADMIN
+  SUPPORT
+  FINANCE
+  ANALYTICS
+}
+
+enum KycType {
+  PASSPORT
+  NATIONAL_ID
+  DRIVER_LICENSE
+  COMPANY_REGISTRATION
+  TAX_CARD
+  PARTNER_DOCUMENT
+}
+
+enum SplitStatus {
+  PENDING
+  AUTHORIZED
+  SETTLED
+  FAILED
+  CANCELED
+}
+
+enum DomainEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum UserRewardStatus {
+  CLAIMABLE
+  CLAIMED
+  EXPIRED
+  REVOKED
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+  SYSTEM
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Logs de sistema
+enum LogLevel {
+  TRACE
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+/**
+ * =====================================
+ * Módulo: Core Users / Security
+ * =====================================
+ */
+
+model User {
+  id        String    @id @default(uuid())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  version   Int       @default(1)
+
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  type         UserType
+  taxId        String?  @unique
+  avatarUrl    String?
+
+  isActive       Boolean @default(true)
+  canGeneratePix Boolean @default(false)
+  canWithdraw    Boolean @default(false)
+  kycApproved    Boolean @default(false)
+
+  kycs              Kyc[]
+  credential        Credential?
+  allowedIps        AllowedIp[]
+  transactions      Transaction[]
+  statements        Statement[]
+  customers         Customer[]
+  withdrawals       Withdrawal[]
+  automations       AutomationRule[]
+  deliveries        AutomationDelivery[]
+  supportTickets    SupportTicket[]
+  settings          UserSettings?
+  apiKeys           ApiKey[]
+  userAcquirerPrefs UserAcquirerConfig[]
+
+  // Notificações
+  notifications Notification[]
+
+  // Gamificação
+  levelProgress    LevelProgress?
+  userRewards      UserReward[]
+  userAchievements UserAchievement[]
+
+  // Produtos e checkouts
+  products  Product[]
+  checkouts Checkout[]
+
+  // Auditoria/eventos/logs
+  auditEntries AuditEntry[]  @relation("AuditActor")
+  domainEvents DomainEvent[] @relation("DomainEventActor")
+  systemLogs   SystemLog[]   @relation("SystemLogActor")
+  Ranking      Ranking?
+
+  @@index([email])
+  @@index([taxId])
+}
+
+model Credential {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  publicKey  String
+  secretKey  String
+  rotatedAt  DateTime?
+  rotationBy String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  version    Int       @default(1)
+}
+
+model AllowedIp {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  cidr      String
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, cidr])
+  @@index([userId])
+}
+
+model ApiKey {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  name        String
+  keyHash     String    @unique
+  scopes      String[]
+  allowedIps  String[]
+  description String?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  version     Int       @default(1)
+
+  @@index([userId])
+}
+
+/**
+ * =====================================
+ * Compliance / KYC
+ * =====================================
+ */
+
+model Kyc {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  type      KycType
+  fileFront String?
+  fileBack  String?
+  selfieUrl String?
+  createdAt DateTime @default(now())
+
+  verifiedAt DateTime?
+  verifiedBy String?
+  notes      String?
+
+  @@index([userId])
+}
+
+/**
+ * =====================================
+ * Notifications
+ * =====================================
+ */
+
+model Notification {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  title       String
+  description String?
+  type        NotificationType     @default(INFO)
+  priority    NotificationPriority @default(MEDIUM)
+  isRead      Boolean              @default(false)
+  url         String? // Link para ação relacionada
+  metadata    Json?
+
+  @@index([userId, isRead, createdAt(sort: Desc)])
+  @@index([type, priority])
+}
+
+/**
+ * =====================================
+ * Payments / Transactions
+ * =====================================
+ */
+
+model Transaction {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  amount      Decimal           @db.Decimal(18, 2)
+  currency    Currency          @default(BRL)
+  type        TransactionType
+  method      PaymentMethod
+  status      TransactionStatus
+  feeAmount   Decimal?          @db.Decimal(18, 2)
+  description String?
+  externalRef String?
+  payload     Json
+  metadata    Json?
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  acquirerId String?
+  acquirer   Acquirer? @relation(fields: [acquirerId], references: [id])
+
+  splits TransactionSplit[]
+
+  // Checkout/upsell tracking
+  checkoutId        String?
+  checkout          Checkout?        @relation(fields: [checkoutId], references: [id])
+  checkoutVariantId String?
+  checkoutVariant   CheckoutVariant? @relation(fields: [checkoutVariantId], references: [id])
+  funnelStage       String? // "PRIMARY","BUMP","UPSELL","DOWNSELL"
+
+  @@index([userId, createdAt])
+  @@index([acquirerId])
+  @@index([externalRef])
+  @@index([checkoutId])
+  @@index([checkoutVariantId])
+}
+
+model TransactionSplit {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  amount         Decimal     @db.Decimal(18, 2)
+  recipientEmail String
+  status         SplitStatus @default(PENDING)
+  externalRef    String?
+  metadata       Json?
+
+  @@index([transactionId])
+  @@index([recipientEmail])
+}
+
+/**
+ * =====================================
+ * Statements
+ * =====================================
+ */
+
+model Statement {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  currentBalance Decimal  @db.Decimal(18, 2)
+  pendingBalance Decimal  @db.Decimal(18, 2)
+  blockedBalance Decimal  @db.Decimal(18, 2)
+  reserveBalance Decimal  @db.Decimal(18, 2)
+  initialBalance Decimal  @db.Decimal(18, 2)
+  variation      Decimal  @db.Decimal(18, 2)
+  finalBalance   Decimal  @db.Decimal(18, 2)
+  asOf           DateTime @default(now())
+  source         String?
+
+  @@index([userId, createdAt])
+  @@index([userId, asOf])
+}
+
+/**
+ * =====================================
+ * MED
+ * =====================================
+ */
+
+model Med {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  amount    Decimal   @db.Decimal(18, 2)
+  reason    String
+  status    String
+  response  Json
+  expiresAt DateTime?
+  metadata  Json?
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+}
+
+/**
+ * =====================================
+ * Customers
+ * =====================================
+ */
+
+model Customer {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  name    String
+  taxId   String?
+  email   String?
+  phone   String?
+  product String?
+  amount  Decimal       @db.Decimal(18, 2)
+  payment PaymentMethod
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  version   Int       @default(1)
+
+  transactions Transaction[]
+  meds         Med[]
+
+  address  Json?
+  metadata Json?
+
+  @@index([userId, email])
+  @@index([userId, taxId])
+}
+
+/**
+ * =====================================
+ * Analytics (simples)
+ * =====================================
+ */
+
+model Analytic {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  sessions       Int
+  users          Int
+  pixGenerated   Int
+  pixPaid        Int
+  creditPaid     Int
+  creditError    Int
+  rejections     Int
+  avgPixTimeSec  Int?
+  trafficSources String?
+  technology     String?
+}
+
+/**
+ * =====================================
+ * Withdrawals
+ * =====================================
+ */
+
+model Withdrawal {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  amount      Decimal       @db.Decimal(18, 2)
+  method      PaymentMethod
+  pixKeyType  String?
+  pixKey      String?
+  description String?
+  status      String
+  dailyLimit  Decimal?      @db.Decimal(18, 2)
+
+  externalRef String?
+  payload     Json?
+  metadata    Json?
+
+  @@index([userId, createdAt])
+  @@index([externalRef])
+}
+
+/**
+ * =====================================
+ * Automations / Webhooks
+ * =====================================
+ */
+
+model AutomationRule {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  name   String
+  status AutomationStatus  @default(ENABLED)
+  url    String
+  events AutomationEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  deliveries AutomationDelivery[]
+  secrets    WebhookSecret[]
+
+  headers   Json?
+  transform Json?
+}
+
+model WebhookSecret {
+  id     String         @id @default(uuid())
+  ruleId String
+  rule   AutomationRule @relation(fields: [ruleId], references: [id])
+
+  name       String
+  secretHash String
+  validFrom  DateTime  @default(now())
+  validTo    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([ruleId, validFrom])
+}
+
+model AutomationDelivery {
+  id     String         @id @default(uuid())
+  ruleId String
+  rule   AutomationRule @relation(fields: [ruleId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  event        AutomationEvent
+  payload      Json
+  attempt      Int             @default(1)
+  status       DeliveryStatus  @default(PENDING)
+  responseCode Int?
+  responseBody String?
+  error        String?
+  deliveredAt  DateTime?
+  createdAt    DateTime        @default(now())
+
+  nextAttemptAt  DateTime?
+  lockedAt       DateTime?
+  lockOwner      String?
+  correlationId  String?
+  idempotencyKey String?
+  metadata       Json?
+
+  @@index([ruleId, createdAt])
+  @@index([userId])
+  @@index([idempotencyKey])
+  @@index([correlationId])
+}
+
+/**
+ * =====================================
+ * Support
+ * =====================================
+ */
+
+model SupportTicket {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  title   String
+  message String
+  status  TicketStatus @default(OPEN)
+  reply   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  priority  Int      @default(3)
+  tags      String[]
+
+  @@index([userId, createdAt])
+}
+
+/**
+ * =====================================
+ * Global & User Settings
+ * =====================================
+ */
+
+model GlobalConfig {
+  id                  String  @id @default(uuid())
+  minPixWithdrawal    Decimal @db.Decimal(18, 2)
+  minCryptoWithdrawal Decimal @db.Decimal(18, 2)
+  pixFeePercent       Decimal @db.Decimal(5, 2)
+  pixFeeFixed         Decimal @db.Decimal(18, 2)
+  creditFeePercent    Decimal @db.Decimal(5, 2)
+  creditFeeFixed      Decimal @db.Decimal(18, 2)
+  reservePercent      Decimal @db.Decimal(5, 2)
+  reserveFixed        Decimal @db.Decimal(18, 2)
+  siteName            String
+  siteUrl             String
+  pixAcquirerId       String?
+  creditAcquirerId    String?
+  cryptoAcquirerId    String?
+
+  // Campos adicionados para SEO, logo, etc.
+  siteLogoUrl           String?
+  faviconUrl            String?
+  seoDefaultTitle       String?
+  seoDefaultDescription String?
+  seoDefaultKeywords    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+  flags     Json?
+}
+
+model UserSettings {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  minPixWithdrawal     Decimal? @db.Decimal(18, 2)
+  minCryptoWithdrawal  Decimal? @db.Decimal(18, 2)
+  dailyWithdrawalLimit Decimal? @db.Decimal(18, 2)
+  pixAcquirerId        String?
+  creditAcquirerId     String?
+  cryptoAcquirerId     String?
+
+  // Campos adicionados para preferências do usuário
+  preferredTheme    String? // "dark", "light", "system"
+  preferredLanguage String? // "pt-BR", "en-US", etc.
+  timezone          String? // "America/Sao_Paulo", etc.
+  notificationEmail Boolean @default(true)
+  notificationPush  Boolean @default(false)
+
+  // Campos para SEO personalizados por usuário (overrides)
+  customSeoTitle       String?
+  customSeoDescription String?
+  customSeoKeywords    String?
+  customLogoUrl        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+  flags     Json?
+}
+
+/**
+ * =====================================
+ * Acquirers
+ * =====================================
+ */
+
+model Acquirer {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  name         String
+  role         String
+  endpoint     String
+  publicToken  String
+  privateToken String
+  active       Boolean @default(true)
+
+  transactions Transaction[]
+  userPrefs    UserAcquirerConfig[]
+
+  timeoutMs   Int?
+  retryPolicy Json?
+
+  @@unique([name, role])
+  @@index([active])
+}
+
+model UserAcquirerConfig {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  acquirerId String
+  acquirer   Acquirer @relation(fields: [acquirerId], references: [id])
+
+  active   Boolean @default(true)
+  priority Int     @default(1)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      Int      @default(1)
+  routingRules Json?
+
+  @@unique([userId, acquirerId])
+  @@index([userId, priority])
+}
+
+/**
+ * =====================================
+ * Gamification
+ * =====================================
+ */
+
+model LevelDefinition {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  code        String  @unique
+  name        String
+  description String?
+  order       Int     @unique
+  threshold   Int
+  iconUrl     String?
+  color       String?
+  rules       Json?
+
+  defaultRewards RewardDefinition[] @relation("LevelDefaultRewards")
+  LevelProgress  LevelProgress[]
+}
+
+model RewardDefinition {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  code             String            @unique
+  name             String
+  description      String?
+  type             String
+  data             Json?
+  expiresAfterDays Int?
+  levelDefaults    LevelDefinition[] @relation("LevelDefaultRewards")
+  unlockRules      Json?
+  UserReward       UserReward[]
+}
+
+model AchievementDefinition {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  code            String            @unique
+  name            String
+  description     String?
+  iconUrl         String?
+  color           String?
+  criteria        Json
+  rewardRefId     String?
+  UserAchievement UserAchievement[]
+}
+
+model LevelProgress {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  currentLevelId String?
+  currentLevel   LevelDefinition? @relation(fields: [currentLevelId], references: [id])
+
+  points    Int      @default(0)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  version   Int      @default(1)
+}
+
+model UserReward {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  rewardId String
+  reward   RewardDefinition @relation(fields: [rewardId], references: [id])
+
+  status         UserRewardStatus @default(CLAIMABLE)
+  grantedAt      DateTime         @default(now())
+  claimedAt      DateTime?
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  metadata       Json?
+  correlationId  String?
+  idempotencyKey String?
+
+  @@index([userId, grantedAt])
+  @@index([idempotencyKey])
+  @@index([correlationId])
+}
+
+model UserAchievement {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  achievementId String
+  achievement   AchievementDefinition @relation(fields: [achievementId], references: [id])
+
+  unlockedAt DateTime @default(now())
+  metadata   Json?
+
+  @@unique([userId, achievementId])
+  @@index([userId, achievementId])
+}
+
+model Ranking {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  points       Int
+  level        Int
+  position     Int
+  achievements String[]
+  rewards      String[]
+  challenges   String[]
+
+  createdAt DateTime @default(now())
+}
+
+/**
+ * =====================================
+ * Audit / Events / System Logs
+ * =====================================
+ */
+
+model AuditEntry {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  actorUserId String?
+  actorUser   User?   @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  entity   String
+  entityId String
+  action   String // CREATE/UPDATE/DELETE
+  before   Json?
+  after    Json?
+
+  reason    String?
+  ip        String?
+  userAgent String?
+
+  correlationId  String?
+  idempotencyKey String?
+
+  userScopeId String?
+  metadata    Json?
+
+  @@index([entity, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([correlationId])
+  @@index([idempotencyKey])
+}
+
+model DomainEvent {
+  id          String            @id @default(uuid())
+  createdAt   DateTime          @default(now())
+  processedAt DateTime?
+  status      DomainEventStatus @default(PENDING)
+
+  eventName String
+  payload   Json
+  attempts  Int    @default(0)
+
+  actorUserId String?
+  actorUser   User?   @relation("DomainEventActor", fields: [actorUserId], references: [id])
+
+  correlationId  String?
+  idempotencyKey String?
+
+  @@index([createdAt])
+  @@index([eventName, createdAt])
+  @@index([correlationId])
+  @@index([idempotencyKey])
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  level     LogLevel
+  service   String? // ex: "checkout", "payments-worker"
+  category  String? // ex: "db", "network", "auth"
+  message   String
+  context   Json? // campos adicionais estruturados
+  stack     String? // stacktrace quando erro
+
+  // opcional: ator associado
+  actorUserId String?
+  actorUser   User?   @relation("SystemLogActor", fields: [actorUserId], references: [id])
+
+  correlationId String?
+  requestId     String?
+  traceId       String?
+
+  @@index([createdAt])
+  @@index([service, category, createdAt])
+  @@index([correlationId])
+  @@index([traceId])
+}
+
+/**
+ * =====================================
+ * Produtos e Checkouts (Vendas por link)
+ * =====================================
+ */
+
+// Produto vendido pelo usuário
+model Product {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  name        String
+  description String?
+  sku         String?
+  active      Boolean @default(true)
+
+  // preço base (variações ficam em CheckoutVariant)
+  basePrice Decimal? @db.Decimal(18, 2)
+  currency  Currency @default(BRL)
+
+  images String[] // URLs
+  tags   String[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  version   Int       @default(1)
+  metadata  Json?
+
+  checkouts Checkout[]
+}
+
+// Checkout: página/fluxo de venda via link
+model Checkout {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  name   String // nome do checkout
+  slug   String @unique // para link amigável
+  status String @default("ACTIVE") // ACTIVE/PAUSED/ARCHIVED
+
+  // Elementos de conversão (customizáveis)
+  primaryColor     String? // ex: "#1E88E5"
+  secondaryColor   String?
+  accentColor      String?
+  logoUrl          String?
+  bannerUrl        String?
+  headline         String?
+  subheadline      String?
+  guaranteeBadge   String? // ex: "7 dias de garantia"
+  testimonials     Json? // lista estruturada
+  faq              Json? // lista de perguntas
+  timerEnabled     Boolean   @default(false)
+  timerType        String? // "COUNTDOWN_FIXED" | "EVERGREEN"
+  timerEndsAt      DateTime? // para COUNTDOWN_FIXED
+  timerDurationSec Int? // para EVERGREEN
+
+  // Copy/layout configs
+  layout Json? // ordenação de blocos, densidade, posicionamento do form
+  fields Json? // campos adicionais do comprador
+  seo    Json? // title/description/og
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  version   Int       @default(1)
+  metadata  Json?
+
+  // Variações de checkout (A/B test)
+  variants     CheckoutVariant[]
+  // Relacionamento com transações
+  transactions Transaction[]
+
+  // Funil
+  orderBumps CheckoutOrderBump[]
+  upsells    CheckoutUpsell[]
+  downsells  CheckoutDownsell[]
+
+  @@index([userId, createdAt])
+  @@index([productId])
+  @@index([slug])
+}
+
+// Variação de checkout para A/B Testing
+model CheckoutVariant {
+  id         String   @id @default(uuid())
+  checkoutId String
+  checkout   Checkout @relation(fields: [checkoutId], references: [id])
+
+  name         String // "Variante A", "Head Verde", etc.
+  trafficShare Int     @default(50) // percentual inteiro, soma das variantes do checkout deve ser &lt;=100
+  active       Boolean @default(true)
+
+  // Customizações específicas da variante
+  price          Decimal?  @db.Decimal(18, 2) // override do preço
+  currency       Currency?
+  primaryColor   String?
+  secondaryColor String?
+  bannerUrl      String?
+  headline       String?
+  subheadline    String?
+  layout         Json?
+  fields         Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+  metadata  Json?
+
+  // Métricas simples (opcional; ou calcule via analytics)
+  views       Int @default(0)
+  clicks      Int @default(0)
+  conversions Int @default(0)
+
+  // Transações associadas
+  transactions Transaction[]
+
+  @@index([checkoutId])
+}
+
+// Order Bump: oferta adicional antes do pagamento
+model CheckoutOrderBump {
+  id         String   @id @default(uuid())
+  checkoutId String
+  checkout   Checkout @relation(fields: [checkoutId], references: [id])
+
+  name           String
+  description    String?
+  price          Decimal  @db.Decimal(18, 2)
+  currency       Currency @default(BRL)
+  productRefId   String? // se for outro produto
+  iconUrl        String?
+  highlightColor String?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+  metadata  Json?
+
+  position       Int      @default(1) // ordem de exibição
+  acceptanceRate Decimal? @db.Decimal(5, 2) // opcional: armazene média
+
+  @@index([checkoutId, position])
+}
+
+// Upsell: oferta pós-compra (one-click se aplicável)
+model CheckoutUpsell {
+  id         String   @id @default(uuid())
+  checkoutId String
+  checkout   Checkout @relation(fields: [checkoutId], references: [id])
+
+  name         String
+  description  String?
+  price        Decimal  @db.Decimal(18, 2)
+  currency     Currency @default(BRL)
+  productRefId String?
+  mediaUrl     String? // vídeo/imagem da oferta
+  headline     String?
+  ctaText      String? // call-to-action
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+  metadata  Json?
+
+  position Int @default(1)
+
+  @@index([checkoutId, position])
+}
+
+// Downsell: oferta alternativa se upsell for recusado
+model CheckoutDownsell {
+  id         String   @id @default(uuid())
+  checkoutId String
+  checkout   Checkout @relation(fields: [checkoutId], references: [id])
+
+  name         String
+  description  String?
+  price        Decimal  @db.Decimal(18, 2)
+  currency     Currency @default(BRL)
+  productRefId String?
+  mediaUrl     String?
+  headline     String?
+  ctaText      String?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+  metadata  Json?
+
+  position Int @default(1)
+
+  @@index([checkoutId, position])
+}
