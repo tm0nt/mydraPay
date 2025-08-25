@@ -1,25 +1,32 @@
-// app/login/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react"; // Import do NextAuth
+import { signIn } from "next-auth/react";
 import { toast } from "sonner";
 
 export default function LoginPage() {
   const router = useRouter();
+
+  // Todos os hooks declarados incondicionalmente no topo
+  const [mounted, setMounted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
+
+  useEffect(() => setMounted(true), []);
+
+  // Guard de montagem apenas para o JSX (hooks já foram chamados)
+  if (!mounted) return null; // Ou retorne um skeleton/loader simples
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,7 +48,7 @@ export default function LoginPage() {
         description: "Você será redirecionado para o dashboard.",
         duration: 3000,
       });
-      router.push("/"); // Ajuste para sua rota protegida
+      router.push("/");
     } catch (error) {
       toast.error("Erro inesperado ao fazer login");
     } finally {
@@ -51,12 +58,10 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-black flex items-center justify-center p-4">
-      {/* Seu background e estrutura existentes */}
       <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-black to-pink-900/20" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(139,92,246,0.1),transparent_50%)]" />
-      
+
       <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-8 items-center relative z-10">
-        {/* Left Side - Branding */}
         <div className="hidden lg:block space-y-8">
           <div className="space-y-6">
             <div className="flex items-center">
@@ -65,7 +70,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Right Side - Login Form */}
         <div className="w-full max-w-md mx-auto">
           <Card className="bg-gray-900/50 border-gray-800/50 backdrop-blur-xl shadow-2xl">
             <CardHeader className="space-y-4 pb-6">
@@ -79,7 +83,7 @@ export default function LoginPage() {
                 Entre na sua conta para continuar
               </p>
             </CardHeader>
-            
+
             <CardContent className="space-y-6">
               <form className="space-y-4" onSubmit={handleSubmit}>
                 <div className="space-y-2">
@@ -135,25 +139,33 @@ export default function LoginPage() {
                       Lembrar de mim
                     </Label>
                   </div>
-                  <Link href="/forgot-password" className="text-sm text-purple-400 hover:text-purple-300 transition-colors">
+                  <Link
+                    href="/forgot-password"
+                    className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
+                  >
                     Esqueceu a senha?
                   </Link>
                 </div>
 
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   className="w-full bg-purple-600 hover:bg-purple-700 text-white h-12 rounded-xl font-medium transition-all duration-200 group"
                   disabled={isLoading}
                 >
                   {isLoading ? "Entrando..." : "Entrar"}
-                  {!isLoading && <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />}
+                  {!isLoading && (
+                    <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                  )}
                 </Button>
               </form>
 
               <div className="text-center">
                 <p className="text-gray-400">
                   Não tem uma conta?{" "}
-                  <Link href="/register" className="text-purple-400 hover:text-purple-300 font-medium transition-colors">
+                  <Link
+                    href="/register"
+                    className="text-purple-400 hover:text-purple-300 font-medium transition-colors"
+                  >
                     Criar conta
                   </Link>
                 </p>

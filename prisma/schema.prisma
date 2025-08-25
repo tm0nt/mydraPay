@@ -108,6 +108,14 @@ enum DomainEventStatus {
   FAILED
 }
 
+enum WebhookEvent {
+  PAYMENT_CREATED
+  PAYMENT_PAID
+  WITHDRAWAL_REQUESTED
+  WITHDRAWAL_PAID
+}
+
+
 enum UserRewardStatus {
   CLAIMABLE
   CLAIMED
@@ -191,6 +199,8 @@ model User {
   // Produtos e checkouts
   products  Product[]
   checkouts Checkout[]
+  webhookUsers WebhookUser[]
+
 
   // Auditoria/eventos/logs
   auditEntries AuditEntry[]  @relation("AuditActor")
@@ -372,25 +382,21 @@ model TransactionSplit {
  */
 
 model Statement {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
-
-  currentBalance Decimal  @db.Decimal(18, 2)
-  pendingBalance Decimal  @db.Decimal(18, 2)
-  blockedBalance Decimal  @db.Decimal(18, 2)
-  reserveBalance Decimal  @db.Decimal(18, 2)
-  initialBalance Decimal  @db.Decimal(18, 2)
-  variation      Decimal  @db.Decimal(18, 2)
-  finalBalance   Decimal  @db.Decimal(18, 2)
-  asOf           DateTime @default(now())
-  source         String?
-
-  @@index([userId, createdAt])
-  @@index([userId, asOf])
+  id                String   @id @default(uuid())
+  userId            String
+  asOf              DateTime
+  createdAt         DateTime @default(now())
+  initialBalance    Decimal
+  variation         Decimal
+  finalBalance      Decimal
+  pendingBalance    Decimal   @default(0) // NOVO
+  blockedBalance    Decimal   @default(0) // NOVO
+  transactionsCount Int       @default(0)
+  source            String?
+  user              User      @relation(fields: [userId], references: [id])
 }
+
+
 
 /**
  * =====================================
@@ -575,6 +581,21 @@ model AutomationDelivery {
   @@index([correlationId])
 }
 
+model WebhookUser {
+  id        String        @id @default(uuid())
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  version   Int           @default(1)
+
+  userId String
+  user   User          @relation(fields: [userId], references: [id])
+
+  url    String
+  events WebhookEvent[] // Campo 'rule' interpretado como array de eventos (pagamento gerado, etc.)
+
+  @@index([userId])
+}
+
 /**
  * =====================================
  * Support
@@ -645,6 +666,12 @@ model UserSettings {
   pixAcquirerId        String?
   creditAcquirerId     String?
   cryptoAcquirerId     String?
+  pixFeePercent       Decimal? @db.Decimal(5, 2)
+  pixFeeFixed         Decimal? @db.Decimal(18, 2)
+  creditFeePercent    Decimal? @db.Decimal(5, 2)
+  creditFeeFixed      Decimal? @db.Decimal(18, 2)
+  reservePercent      Decimal? @db.Decimal(5, 2)
+  reserveFixed        Decimal? @db.Decimal(18, 2)
 
   // Campos adicionados para preferências do usuário
   preferredTheme    String? // "dark", "light", "system"

@@ -1,7 +1,21 @@
-import { NextResponse } from "next/server"
-import { auth } from "@/auth"
-import prisma from "@/lib/prisma"
-import { z } from "zod"
+// app/api/settings/user/route.ts
+import { NextResponse } from "next/server";
+import { auth } from "@/auth";
+import prisma from "@/lib/prisma";
+import { z } from "zod";
+
+/* ---------------------------------  CONSTS  -------------------------------- */
+
+const WEBHOOK_EVENTS = [
+  "PAYMENT_CREATED",
+  "PAYMENT_PAID",
+  "WITHDRAWAL_REQUESTED",
+  "WITHDRAWAL_PAID",
+] as const;
+
+type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+/* -----------------------------  ZOD SCHEMAS  ------------------------------- */
 
 const userSettingsSchema = z.object({
   minPixWithdrawal: z.number().positive().optional(),
@@ -20,14 +34,26 @@ const userSettingsSchema = z.object({
   customSeoKeywords: z.string().optional(),
   customLogoUrl: z.string().url().optional(),
   flags: z.record(z.any()).optional(),
-})
+});
 
-// GET /api/settings/user - Obter configurações do usuário
-export async function GET(request: Request) {
-  const session = await auth()
+const allowedIpSchema = z.object({
+  action: z.literal("addIp"),
+  cidr: z.string(),
+  note: z.string().optional(),
+});
 
-  if (!session || !session.user?.email) {
-    return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+const webhookSchema = z.object({
+  action: z.literal("addWebhook"),
+  url: z.string().url(),
+  events: z.array(z.enum(WEBHOOK_EVENTS)),
+});
+
+/* ------------------------  GET – USER CONFIG ENDPOINT ----------------------- */
+
+export async function GET() {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
   try {
@@ -35,55 +61,82 @@ export async function GET(request: Request) {
       where: { email: session.user.email },
       include: {
         settings: true,
+        credential: true,
+        allowedIps: true,
+        webhookUsers: true,
       },
-    })
+    });
 
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
 
-    return NextResponse.json(user.settings)
-  } catch (error) {
-    console.error("Erro ao obter configurações do usuário:", error)
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+    return NextResponse.json({
+      settings: user.settings,
+      credential: user.credential,
+      allowedIps: user.allowedIps,
+      webhooks: user.webhookUsers,
+    });
+  } catch (err) {
+    console.error("Erro ao obter dados do usuário:", err);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }
 
-// PUT /api/settings/user - Atualizar configurações do usuário
-export async function PUT(request: Request) {
-  const session = await auth()
+/* -------------------------  PUT – UPDATE / CREATE -------------------------- */
 
-  if (!session || !session.user?.email) {
-    return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+export async function PUT(request: Request) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
   try {
-    const body = await request.json()
-    const validatedData = userSettingsSchema.parse(body)
-
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
-
+    const body: unknown = await request.json();
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
 
+    /* ---------- Adicionar IP ---------- */
+    const ipParse = allowedIpSchema.safeParse(body);
+    if (ipParse.success) {
+      const { cidr, note } = ipParse.data;
+      const allowedIp = await prisma.allowedIp.create({
+        data: { userId: user.id, cidr, note },
+      });
+      return NextResponse.json(allowedIp);
+    }
+
+    /* -------- Adicionar Webhook -------- */
+    const webhookParse = webhookSchema.safeParse(body);
+    if (webhookParse.success) {
+      const { url, events } = webhookParse.data;
+      const webhook = await prisma.webhookUser.create({
+        data: { userId: user.id, url, events },
+      });
+      return NextResponse.json(webhook);
+    }
+
+    /* -------- Atualizar UserSettings -------- */
+    const validated = userSettingsSchema.parse(body);
     const userSettings = await prisma.userSettings.upsert({
       where: { userId: user.id },
-      update: validatedData,
-      create: {
-        userId: user.id,
-        ...validatedData,
-      },
-    })
+      update: validated,
+      create: { userId: user.id, ...validated },
+    });
 
-    return NextResponse.json(userSettings)
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Dados inválidos", details: error.errors }, { status: 400 })
+    return NextResponse.json(userSettings);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: "Dados inválidos", details: err.errors }, { status: 400 });
     }
-    console.error("Erro ao atualizar configurações do usuário:", error)
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+    console.error("Erro ao atualizar dados do usuário:", err);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }
+
+/* -----------------------------  TYPE EXPORTS ------------------------------- */
+/*  Opcional: exporte para reutilizar no front.                                */
+export type { WebhookEvent };
+export { WEBHOOK_EVENTS };

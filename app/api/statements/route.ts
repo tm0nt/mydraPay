@@ -1,82 +1,97 @@
-import { NextResponse } from "next/server"
-import { auth } from "@/auth"
-import prisma from "@/lib/prisma"
-import { z } from "zod"
+import { NextResponse } from "next/server";
+import { auth } from "@/auth";
+import prisma from "@/lib/prisma";
+import { z } from "zod";
 
-const statementSchema = z.object({
-  currentBalance: z.number(),
-  pendingBalance: z.number().default(0),
-  blockedBalance: z.number().default(0),
-  reserveBalance: z.number().default(0),
-  initialBalance: z.number(),
-  variation: z.number(),
-  finalBalance: z.number(),
-  source: z.string().optional(),
-})
+const querySchema = z.object({
+  page: z.preprocess((v) => Number(v ?? "1"), z.number().int().positive()),
+  limit: z.preprocess((v) => Number(v ?? "20"), z.number().int().positive()),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+});
 
-// GET /api/statements - Listar extratos
-export async function GET(request: Request) {
-  const session = await auth()
-
-  if (!session || !session.user?.email) {
-    return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+export async function GET(req: Request) {
+  /* ------------------------- autenticação ------------------------- */
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
-  try {
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    })
+  /* -------------------------- usuário ----------------------------- */
+  const user = await prisma.user.findUnique({
+    where: { email: session.user.email },
+    select: { id: true },
+  });
+  if (!user) {
+    return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
+  }
 
-    if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
-    }
+  /* ------------------------ parâmetros ---------------------------- */
+  const { searchParams } = new URL(req.url);
+  const parse = querySchema.safeParse({
+    page: searchParams.get("page"),
+    limit: searchParams.get("limit"),
+    startDate: searchParams.get("startDate"),
+    endDate: searchParams.get("endDate"),
+  });
 
-    const { searchParams } = new URL(request.url)
-    const page = Number.parseInt(searchParams.get("page") || "1")
-    const limit = Number.parseInt(searchParams.get("limit") || "20")
-    const startDate = searchParams.get("startDate")
-    const endDate = searchParams.get("endDate")
+  if (!parse.success) {
+    return NextResponse.json({ error: "Parâmetros inválidos" }, { status: 400 });
+  }
 
-    const skip = (page - 1) * limit
+  const { page, limit, startDate, endDate } = parse.data;
+  const skip = (page - 1) * limit;
 
-    const where: any = { userId: user.id }
+  /* ------------------------- filtro ------------------------------- */
+  const where: any = { userId: user.id };
+  if (startDate || endDate) {
+    where.asOf = {};
+    if (startDate) where.asOf.gte = new Date(startDate);
+    if (endDate)   where.asOf.lte = new Date(endDate);
+  }
 
-    if (startDate || endDate) {
-      where.asOf = {}
-      if (startDate) where.asOf.gte = new Date(startDate)
-      if (endDate) where.asOf.lte = new Date(endDate)
-    }
-
-    const [statements, total] = await Promise.all([
-      prisma.statement.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { asOf: "desc" },
-      }),
-      prisma.statement.count({ where }),
-    ])
-
-    // Obter saldo atual (último statement)
-    const latestStatement = await prisma.statement.findFirst({
+  /* ------------- consulta + total + saldo atual ------------------- */
+  const [statements, total, latest] = await prisma.$transaction([
+    prisma.statement.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { asOf: "desc" },
+      select: {
+        id: true,
+        asOf: true,
+        initialBalance: true,
+        variation: true,
+        finalBalance: true,
+        transactionsCount: true,
+      },
+    }),
+    prisma.statement.count({ where }),
+    prisma.statement.findFirst({
       where: { userId: user.id },
       orderBy: { asOf: "desc" },
-    })
+      select: { finalBalance: true },
+    }),
+  ]);
 
-    return NextResponse.json({
-      statements,
-      currentBalance: latestStatement?.finalBalance || 0,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
-    })
-  } catch (error) {
-    console.error("Erro ao listar extratos:", error)
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
-  }
+  /* ----------- transformar Decimal -> Number para JSON ------------ */
+  const mapped = statements.map((s) => ({
+    ...s,
+    initialBalance: Number(s.initialBalance),
+    variation:      Number(s.variation),
+    finalBalance:   Number(s.finalBalance),
+  }));
+
+  return NextResponse.json({
+    statements: mapped,
+    currentBalance: Number(latest?.finalBalance ?? 0),
+    pagination: {
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit) || 1,
+    },
+  });
 }
 
 // POST /api/statements - Criar extrato

@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/auth"
-import prisma from "@/lib/prisma"
-import { z } from "zod"
+// api/transactions/route.ts
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/auth";
+import prisma from "@/lib/prisma";
+import { z } from "zod";
 
 const transactionSchema = z.object({
   amount: z.number().positive("Valor deve ser positivo"),
@@ -14,45 +15,50 @@ const transactionSchema = z.object({
   acquirerId: z.string().uuid().optional(),
   externalRef: z.string().optional(),
   metadata: z.record(z.any()).optional(),
-})
+});
 
 // GET /api/transactions - Listar transações
 export async function GET(request: Request) {
-    const session = await getServerSession(authOptions)
-  
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
-    }
+  const session = await getServerSession(authOptions);
+
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  }
 
   try {
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
-    })
+    });
 
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
 
-    const { searchParams } = new URL(request.url)
-    const page = Number.parseInt(searchParams.get("page") || "1")
-    const limit = Number.parseInt(searchParams.get("limit") || "20")
-    const status = searchParams.get("status")
-    const type = searchParams.get("type")
-    const method = searchParams.get("method")
-    const startDate = searchParams.get("startDate")
-    const endDate = searchParams.get("endDate")
+    const { searchParams } = new URL(request.url);
+    const page = Number.parseInt(searchParams.get("page") || "1");
+    const limit = Number.parseInt(searchParams.get("limit") || "20");
+    const status = searchParams.get("status");
+    const type = searchParams.get("type");
+    const startDate = searchParams.get("startDate");
+    const endDate = searchParams.get("endDate");
+    const q = searchParams.get("q");
 
-    const skip = (page - 1) * limit
+    const skip = (page - 1) * limit;
 
-    const where: any = { userId: user.id }
+    const where: any = { userId: user.id };
 
-    if (status) where.status = status
-    if (type) where.type = type
-    if (method) where.method = method
+    if (status) where.status = status;
+    if (type) where.type = type;
     if (startDate || endDate) {
-      where.createdAt = {}
-      if (startDate) where.createdAt.gte = new Date(startDate)
-      if (endDate) where.createdAt.lte = new Date(endDate)
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
+    }
+    if (q) {
+      where.OR = [
+        { description: { contains: q, mode: "insensitive" } },
+        { id: { contains: q, mode: "insensitive" } },
+      ];
     }
 
     const [transactions, total] = await Promise.all([
@@ -80,19 +86,31 @@ export async function GET(request: Request) {
         },
       }),
       prisma.transaction.count({ where }),
-    ])
+    ]);
 
-    // Calcular estatísticas
-    const stats = await prisma.transaction.aggregate({
-      where: { userId: user.id },
+    // Calcular estatísticas separadas por tipo
+    const incomingStats = await prisma.transaction.aggregate({
+      where: { ...where, type: "INCOMING" },
       _sum: {
         amount: true,
+      },
+    });
+
+    const outgoingStats = await prisma.transaction.aggregate({
+      where: { ...where, type: "OUTGOING" },
+      _sum: {
+        amount: true,
+      },
+    });
+
+    const feesStats = await prisma.transaction.aggregate({
+      where,
+      _sum: {
         feeAmount: true,
       },
-      _count: {
-        _all: true,
-      },
-    })
+    });
+
+    const totalTransactions = await prisma.transaction.count({ where });
 
     return NextResponse.json({
       transactions,
@@ -103,35 +121,36 @@ export async function GET(request: Request) {
         pages: Math.ceil(total / limit),
       },
       stats: {
-        totalAmount: stats._sum.amount || 0,
-        totalFees: stats._sum.feeAmount || 0,
-        totalTransactions: stats._count._all,
+        totalIncoming: incomingStats._sum.amount ?? 0,
+        totalOutgoing: outgoingStats._sum.amount ?? 0,
+        totalFees: feesStats._sum.feeAmount ?? 0,
+        totalTransactions,
       },
-    })
+    });
   } catch (error) {
-    console.error("Erro ao listar transações:", error)
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+    console.error("Erro ao listar transações:", error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }
 
 // POST /api/transactions - Criar transação
 export async function POST(request: Request) {
-  const session = await auth()
+  const session = await getServerSession(authOptions);
 
-  if (!session || !session.user?.email) {
-    return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
   try {
-    const body = await request.json()
-    const validatedData = transactionSchema.parse(body)
+    const body = await request.json();
+    const validatedData = transactionSchema.parse(body);
 
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
-    })
+    });
 
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
 
     // Verificar se customer existe (se fornecido)
@@ -141,10 +160,10 @@ export async function POST(request: Request) {
           id: validatedData.customerId,
           userId: user.id,
         },
-      })
+      });
 
       if (!customer) {
-        return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 })
+        return NextResponse.json({ error: "Cliente não encontrado" }, { status: 404 });
       }
     }
 
@@ -152,10 +171,10 @@ export async function POST(request: Request) {
     if (validatedData.acquirerId) {
       const acquirer = await prisma.acquirer.findUnique({
         where: { id: validatedData.acquirerId },
-      })
+      });
 
       if (!acquirer || !acquirer.active) {
-        return NextResponse.json({ error: "Adquirente não encontrado ou inativo" }, { status: 404 })
+        return NextResponse.json({ error: "Adquirente não encontrado ou inativo" }, { status: 404 });
       }
     }
 
@@ -190,14 +209,14 @@ export async function POST(request: Request) {
           },
         },
       },
-    })
+    });
 
-    return NextResponse.json(transaction, { status: 201 })
+    return NextResponse.json(transaction, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Dados inválidos", details: error.errors }, { status: 400 })
+      return NextResponse.json({ error: "Dados inválidos", details: error.errors }, { status: 400 });
     }
-    console.error("Erro ao criar transação:", error)
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+    console.error("Erro ao criar transação:", error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }

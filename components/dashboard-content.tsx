@@ -409,17 +409,12 @@ const DashboardContent = () => {
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <div className="space-y-1">
                   <CardTitle className="text-sm font-medium text-gray-400 group-hover:text-gray-300">{card.title}</CardTitle>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs px-2 py-1 rounded-full ${card.trendUp ? "bg-green-500/20 text-green-400" : "bg-gray-500/20 text-gray-400"}`}>
-                      {card.trend}
-                    </span>
-                  </div>
                 </div>
                 <div className="p-3 bg-gray-800/50 rounded-xl group-hover:scale-110">
                   <card.icon className="h-5 w-5 text-gray-400" />
                 </div>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent>
                 <div className="text-2xl font-bold text-white group-hover:text-white/90">{maskValue(card.amount)}</div>
                 <p className="text-xs text-gray-500 group-hover:text-gray-400">{card.description}</p>
               </CardContent>

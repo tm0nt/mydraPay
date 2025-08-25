@@ -3,15 +3,27 @@ import { Inter } from 'next/font/google';
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "sonner";
-import { UserProvider } from "@/contexts/UserContext"; // Importe o provider aqui
+import { UserProvider } from "@/contexts/UserContext";
+import  prisma  from "@/lib/prisma"; 
 
 const inter = Inter({ subsets: ["latin"] });
 
-export const metadata: Metadata = {
-  title: "AURA Dashboard",
-  description: "Professional financial dashboard with elegant design.",
-  generator: 'v0.app'
-};
+// Função assíncrona para gerar metadata dinamicamente do banco Prisma
+export async function generateMetadata(): Promise<Metadata> {
+  // Consulte o banco (ex: pegue o primeiro registro de SiteSettings)
+  const settings = await prisma.globalConfig.findFirst();
+
+  // Fallback para valores default se não houver dados
+  const defaultTitle = "AURA Dashboard";
+  const defaultDescription = "Professional financial dashboard with elegant design.";
+  const defaultKeywords = "finanças, dashboard, AURA, SEO keywords";
+
+  return {
+    title: settings?.seoDefaultTitle || defaultTitle,
+    description: settings?.seoDefaultDescription || defaultDescription,
+    keywords: settings?.seoDefaultKeywords || defaultKeywords,
+  };
+}
 
 export default function RootLayout({
   children,
@@ -20,14 +32,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} dark bg-black text-foreground`}>
+      <body
+        className={`${inter.className} dark bg-black text-foreground`}
+        suppressHydrationWarning // Suprime mismatch causado por extensões
+      >
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >
-          <UserProvider> {/* Envolva aqui! */}
+          <UserProvider>
             {children}
             <Toaster 
               theme="dark"

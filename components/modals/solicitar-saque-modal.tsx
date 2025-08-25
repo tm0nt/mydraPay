@@ -116,7 +116,7 @@ export function SolicitarSaqueModal({ open, onOpenChange }: SolicitarSaqueModalP
                   </div>
                   <div className="text-right">
                     <p className="text-gray-400 text-sm font-medium">Limite Diário</p>
-                    <p className="text-white font-semibold text-lg">R$ 5.000,00</p>
+                    <p className="text-white font-semibold text-lg">R$ 10.000,00</p>
                     <div className="flex items-center gap-1 mt-1">
                       <TrendingUp className="w-3 h-3 text-green-400" />
                       <span className="text-green-400 text-xs">Disponível</span>
@@ -127,20 +127,13 @@ export function SolicitarSaqueModal({ open, onOpenChange }: SolicitarSaqueModalP
             </Card>
 
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-2 bg-gray-900/50 backdrop-blur-sm rounded-2xl p-1 border border-gray-700/50">
+              <TabsList className="grid w-full grid-cols-1 bg-gray-900/50 backdrop-blur-sm rounded-2xl p-1 border border-gray-700/50">
                 <TabsTrigger
                   value="pix"
                   className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-blue-600 rounded-xl transition-all duration-300"
                 >
                   <QrCode className="w-4 h-4 mr-2" />
                   PIX
-                </TabsTrigger>
-                <TabsTrigger
-                  value="crypto"
-                  className="data-[state=active]:bg-gradient-to-r data-[state=active]:from-orange-600 data-[state=active]:to-yellow-600 rounded-xl transition-all duration-300"
-                >
-                  <Bitcoin className="w-4 h-4 mr-2" />
-                  Criptomoeda
                 </TabsTrigger>
               </TabsList>
 
