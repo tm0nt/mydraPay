@@ -14,8 +14,17 @@ export default async function DashboardPage() {
 
   return (
     <SidebarProvider>
-      <AppSidebar />
-      <DashboardContent />
+      <div className="flex min-h-screen w-full bg-black">
+        {/* Sidebar completamente fixo - não se move com scroll */}
+        <div className="fixed left-0 top-0 h-screen w-64 z-50 flex-shrink-0">
+          <AppSidebar />
+        </div>
+        
+        {/* Conteúdo principal com margem esquerda para compensar o sidebar fixo */}
+        <div className="flex-1 ml-64 overflow-auto">
+          <DashboardContent />
+        </div>
+      </div>
     </SidebarProvider>
   );
 }

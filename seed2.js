@@ -8,6 +8,8 @@ async function main() {
     data: {
       minPixWithdrawal: 10.00,
       minCryptoWithdrawal: 50.00,
+      minCryptoWithdrawalTax: 10,
+      minPixWithdrawalTax: 10,
       pixFeePercent: 1.50,
       pixFeeFixed: 0.50,
       creditFeePercent: 3.00,

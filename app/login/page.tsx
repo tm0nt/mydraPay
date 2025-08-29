@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Eye, EyeOff, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Image from "next/image"; // ✅ import do next/image
 import { signIn } from "next-auth/react";
 import { toast } from "sonner";
 
@@ -65,7 +66,13 @@ export default function LoginPage() {
         <div className="hidden lg:block space-y-8">
           <div className="space-y-6">
             <div className="flex items-center">
-              <img src="/logo-mydra.png" width="300" alt="Logo Mydra" />
+              <Image
+                src="/logo-mydra.png"
+                width={300}
+                height={80} // altura aproximada
+                alt="Logo Mydra"
+                priority
+              />
             </div>
           </div>
         </div>
@@ -74,7 +81,13 @@ export default function LoginPage() {
           <Card className="bg-gray-900/50 border-gray-800/50 backdrop-blur-xl shadow-2xl">
             <CardHeader className="space-y-4 pb-6">
               <div className="lg:hidden flex items-center justify-center gap-3 mb-4">
-                <img src="/logo-mydra.png" width="300" alt="Logo Mydra" />
+                <Image
+                src="/logo-mydra.png"
+                width={300}
+                height={80} // altura aproximada
+                alt="Logo Mydra"
+                priority
+              />
               </div>
               <CardTitle className="text-2xl font-bold text-white text-center">
                 Bem-vindo de volta

@@ -43,11 +43,12 @@ export async function GET(req: Request) {
   const skip = (page - 1) * limit;
 
   /* ------------------------- filtro ------------------------------- */
+  // REMOVIDO: status: "COMPLETED" - campo não existe no modelo Statement
   const where: any = { userId: user.id };
   if (startDate || endDate) {
     where.asOf = {};
     if (startDate) where.asOf.gte = new Date(startDate);
-    if (endDate)   where.asOf.lte = new Date(endDate);
+    if (endDate) where.asOf.lte = new Date(endDate);
   }
 
   /* ------------- consulta + total + saldo atual ------------------- */
@@ -68,7 +69,7 @@ export async function GET(req: Request) {
     }),
     prisma.statement.count({ where }),
     prisma.statement.findFirst({
-      where: { userId: user.id },
+      where: { userId: user.id }, // REMOVIDO: status: "COMPLETED"
       orderBy: { asOf: "desc" },
       select: { finalBalance: true },
     }),
@@ -78,8 +79,8 @@ export async function GET(req: Request) {
   const mapped = statements.map((s) => ({
     ...s,
     initialBalance: Number(s.initialBalance),
-    variation:      Number(s.variation),
-    finalBalance:   Number(s.finalBalance),
+    variation: Number(s.variation),
+    finalBalance: Number(s.finalBalance),
   }));
 
   return NextResponse.json({
@@ -94,46 +95,58 @@ export async function GET(req: Request) {
   });
 }
 
+// Defina o schema para POST se estiver sendo usado
+const statementSchema = z.object({
+  currentBalance: z.number(),
+  pendingBalance: z.number(),
+  blockedBalance: z.number(),
+  reserveBalance: z.number().optional(),
+  initialBalance: z.number(),
+  variation: z.number(),
+  finalBalance: z.number(),
+  source: z.string().optional(),
+});
+
 // POST /api/statements - Criar extrato
 export async function POST(request: Request) {
-  const session = await auth()
+  const session = await auth();
 
   if (!session || !session.user?.email) {
-    return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
   try {
-    const body = await request.json()
-    const validatedData = statementSchema.parse(body)
+    const body = await request.json();
+    const validatedData = statementSchema.parse(body);
 
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
-    })
+    });
 
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
 
     const statement = await prisma.statement.create({
       data: {
         userId: user.id,
-        currentBalance: validatedData.currentBalance,
-        pendingBalance: validatedData.pendingBalance,
-        blockedBalance: validatedData.blockedBalance,
-        reserveBalance: validatedData.reserveBalance,
+        asOf: new Date(), // Adicione este campo obrigatório
         initialBalance: validatedData.initialBalance,
         variation: validatedData.variation,
         finalBalance: validatedData.finalBalance,
+        pendingBalance: validatedData.pendingBalance,
+        blockedBalance: validatedData.blockedBalance,
+        transactionsCount: 1, // Adicione este campo obrigatório
         source: validatedData.source,
       },
-    })
+    });
 
-    return NextResponse.json(statement, { status: 201 })
+    return NextResponse.json(statement, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Dados inválidos", details: error.errors }, { status: 400 })
+      return NextResponse.json({ error: "Dados inválidos", details: error.errors }, { status: 400 });
     }
-    console.error("Erro ao criar extrato:", error)
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+    console.error("Erro ao criar extrato:", error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }

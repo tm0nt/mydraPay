@@ -13,36 +13,35 @@ const notificationSchema = z.object({
   metadata: z.record(z.any()).optional(),
 })
 
-// GET /api/notifications - Listar notificações do usuário
 export async function GET(request: Request) {
-  const session = await getServerSession(authOptions)
+  const session = await getServerSession(authOptions);
 
   if (!session?.user?.email) {
-    return NextResponse.json({ error: "Não autenticado" }, { status: 401 })
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
   try {
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
-    })
+      select: { id: true }
+    });
 
     if (!user) {
-      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 })
+      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
 
-    const { searchParams } = new URL(request.url)
-    const page = Number.parseInt(searchParams.get("page") || "1")
-    const limit = Number.parseInt(searchParams.get("limit") || "20")
-    const isRead = searchParams.get("isRead")
-    const type = searchParams.get("type")
-    const priority = searchParams.get("priority")
+    const { searchParams } = new URL(request.url);
+    const page = Number.parseInt(searchParams.get("page") || "1");
+    const limit = Number.parseInt(searchParams.get("limit") || "20");
+    const isRead = searchParams.get("isRead");
+    const type = searchParams.get("type");
+    const priority = searchParams.get("priority");
 
-    const skip = (page - 1) * limit
+    const skip = (page - 1) * limit;
 
-    const where: any = { userId: user.id }
-
-    if (isRead !== null) where.isRead = isRead === "true"
-    if (type) where.type = type
-    if (priority) where.priority = priority
+    const where: any = { userId: user.id };
+    if (isRead !== null) where.isRead = isRead === "true";
+    if (type) where.type = type;
+    if (priority) where.priority = priority;
 
     const [notifications, total, unreadCount] = await Promise.all([
       prisma.notification.findMany({
@@ -53,12 +52,9 @@ export async function GET(request: Request) {
       }),
       prisma.notification.count({ where }),
       prisma.notification.count({
-        where: {
-          userId: user.id,
-          isRead: false,
-        },
+        where: { userId: user.id, isRead: false },
       }),
-    ])
+    ]);
 
     return NextResponse.json({
       notifications,
@@ -69,16 +65,17 @@ export async function GET(request: Request) {
         pages: Math.ceil(total / limit),
       },
       unreadCount,
-    })
+    });
   } catch (error) {
-    console.error("Erro ao listar notificações:", error)
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+    console.error("Erro ao listar notificações:", error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
   }
 }
 
+
 // POST /api/notifications - Criar notificação (sistema interno)
 export async function POST(request: Request) {
-  const session = await auth()
+  const session = await getServerSession(authOptions);
 
   if (!session || !session.user?.email) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 })

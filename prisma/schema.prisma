@@ -115,7 +115,6 @@ enum WebhookEvent {
   WITHDRAWAL_PAID
 }
 
-
 enum UserRewardStatus {
   CLAIMABLE
   CLAIMED
@@ -197,16 +196,18 @@ model User {
   userAchievements UserAchievement[]
 
   // Produtos e checkouts
-  products  Product[]
-  checkouts Checkout[]
+  products     Product[]
+  checkouts    Checkout[]
   webhookUsers WebhookUser[]
-
 
   // Auditoria/eventos/logs
   auditEntries AuditEntry[]  @relation("AuditActor")
   domainEvents DomainEvent[] @relation("DomainEventActor")
   systemLogs   SystemLog[]   @relation("SystemLogActor")
   Ranking      Ranking?
+
+  // Saldo atual
+  balance UserBalance?
 
   @@index([email])
   @@index([taxId])
@@ -389,14 +390,34 @@ model Statement {
   initialBalance    Decimal
   variation         Decimal
   finalBalance      Decimal
-  pendingBalance    Decimal   @default(0) // NOVO
-  blockedBalance    Decimal   @default(0) // NOVO
+  pendingBalance    Decimal   @default(0)
+  blockedBalance    Decimal   @default(0)
   transactionsCount Int       @default(0)
   source            String?
   user              User      @relation(fields: [userId], references: [id])
 }
 
+/**
+ * =====================================
+ * User Balance (saldo atual)
+ * =====================================
+ */
+model UserBalance {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
 
+  currency       Currency @default(BRL)
+  available      Decimal  @db.Decimal(18, 2) @default(0) // saldo que pode ser usado
+  pending        Decimal  @db.Decimal(18, 2) @default(0) // saldo pendente
+  blocked        Decimal  @db.Decimal(18, 2) @default(0) // saldo bloqueado ou reservado
+
+  updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([currency])
+}
 
 /**
  * =====================================
@@ -627,27 +648,34 @@ model SupportTicket {
  */
 
 model GlobalConfig {
-  id                  String  @id @default(uuid())
-  minPixWithdrawal    Decimal @db.Decimal(18, 2)
-  minCryptoWithdrawal Decimal @db.Decimal(18, 2)
-  pixFeePercent       Decimal @db.Decimal(5, 2)
-  pixFeeFixed         Decimal @db.Decimal(18, 2)
-  creditFeePercent    Decimal @db.Decimal(5, 2)
-  creditFeeFixed      Decimal @db.Decimal(18, 2)
-  reservePercent      Decimal @db.Decimal(5, 2)
-  reserveFixed        Decimal @db.Decimal(18, 2)
-  siteName            String
-  siteUrl             String
-  pixAcquirerId       String?
-  creditAcquirerId    String?
-  cryptoAcquirerId    String?
+  id                  String   @id @default(uuid())
+  minPixWithdrawalTax     Decimal? @db.Decimal(18, 2)
+  minCryptoWithdrawalTax  Decimal? @db.Decimal(18, 2)
+  minPixWithdrawal        Decimal @db.Decimal(18, 2)
+  minCryptoWithdrawal     Decimal @db.Decimal(18, 2)
+  pixFeePercent           Decimal @db.Decimal(5, 2)
+  pixFeeFixed             Decimal @db.Decimal(18, 2)
+  creditFeePercent        Decimal @db.Decimal(5, 2)
+  creditFeeFixed          Decimal @db.Decimal(18, 2)
+  reservePercent          Decimal @db.Decimal(5, 2)
+  reserveFixed            Decimal @db.Decimal(18, 2)
+  siteName                String
+  siteUrl                 String
+  pixAcquirerId           String?
+  creditAcquirerId        String?
+  cryptoAcquirerId        String?
 
   // Campos adicionados para SEO, logo, etc.
-  siteLogoUrl           String?
-  faviconUrl            String?
-  seoDefaultTitle       String?
-  seoDefaultDescription String?
-  seoDefaultKeywords    String?
+  siteLogoUrl             String?
+  faviconUrl              String?
+  seoDefaultTitle         String?
+  seoDefaultDescription   String?
+  seoDefaultKeywords      String?
+
+  // Contatos (opcionais)
+  contactEmail            String?
+  whatsappNumber          String?
+  whatsappGroupLink       String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -655,12 +683,15 @@ model GlobalConfig {
   flags     Json?
 }
 
+
 model UserSettings {
   id     String @id @default(uuid())
   userId String @unique
   user   User   @relation(fields: [userId], references: [id])
 
   minPixWithdrawal     Decimal? @db.Decimal(18, 2)
+  minPixWithdrawalTax     Decimal? @db.Decimal(18, 2)
+  minCryptoWithdrawalTax     Decimal? @db.Decimal(18, 2)
   minCryptoWithdrawal  Decimal? @db.Decimal(18, 2)
   dailyWithdrawalLimit Decimal? @db.Decimal(18, 2)
   pixAcquirerId        String?

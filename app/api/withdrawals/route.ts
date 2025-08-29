@@ -83,6 +83,7 @@ export async function POST(request: Request) {
       where: { email: session.user.email },
       include: {
         settings: true,
+        balance: true, // Include balance para verificação
       },
     })
 
@@ -106,6 +107,12 @@ export async function POST(request: Request) {
 
     if (validatedData.amount < Number(minWithdrawal)) {
       return NextResponse.json({ error: `Valor mínimo para saque é R$ ${minWithdrawal}` }, { status: 400 })
+    }
+
+    // Verificar saldo disponível
+    const currentBalance = user.balance?.available || 0
+    if (Number(currentBalance) < validatedData.amount) {
+      return NextResponse.json({ error: "Saldo insuficiente" }, { status: 400 })
     }
 
     // Verificar limite diário (se configurado)
@@ -142,21 +149,150 @@ export async function POST(request: Request) {
       }
     }
 
-    const withdrawal = await prisma.withdrawal.create({
-      data: {
-        userId: user.id,
-        amount: validatedData.amount,
-        method: validatedData.method,
-        pixKeyType: validatedData.pixKeyType,
-        pixKey: validatedData.pixKey,
-        description: validatedData.description,
-        status: "PENDING",
-        dailyLimit: user.settings?.dailyWithdrawalLimit,
-        metadata: validatedData.metadata,
-      },
+    // === TRANSAÇÃO ATÔMICA PARA TODAS AS OPERAÇÕES ===
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Criar o withdrawal
+      const withdrawal = await tx.withdrawal.create({
+        data: {
+          userId: user.id,
+          amount: validatedData.amount,
+          method: validatedData.method,
+          pixKeyType: validatedData.pixKeyType,
+          pixKey: validatedData.pixKey,
+          description: validatedData.description,
+          status: "PENDING",
+          dailyLimit: user.settings?.dailyWithdrawalLimit,
+          metadata: validatedData.metadata,
+        },
+      })
+
+      // 2. Atualizar balance do usuário (reduzir available, aumentar pending)
+      const updatedBalance = await tx.userBalance.update({
+        where: { userId: user.id },
+        data: {
+          available: {
+            decrement: validatedData.amount
+          },
+          pending: {
+            increment: validatedData.amount
+          }
+        }
+      })
+
+      // 3. Criar transação de saída
+      const transaction = await tx.transaction.create({
+        data: {
+          userId: user.id,
+          amount: validatedData.amount,
+          currency: "BRL",
+          type: "OUTGOING",
+          method: validatedData.method,
+          status: "PENDING",
+          description: `Saque PIX - ${validatedData.description || 'Sem descrição'}`,
+          payload: {
+            withdrawalId: withdrawal.id,
+            pixKey: validatedData.pixKey,
+            pixKeyType: validatedData.pixKeyType
+          },
+          metadata: validatedData.metadata,
+        }
+      })
+
+      // 4. Criar statement
+      const statement = await tx.statement.create({
+        data: {
+          userId: user.id,
+          asOf: new Date(),
+          initialBalance: Number(currentBalance),
+          variation: -Number(validatedData.amount),
+          finalBalance: Number(updatedBalance.available),
+          pendingBalance: Number(updatedBalance.pending),
+          blockedBalance: Number(updatedBalance.blocked),
+          transactionsCount: 1,
+          source: "withdrawal_request"
+        }
+      })
+
+      // 5. Criar notificação
+      await tx.notification.create({
+        data: {
+          userId: user.id,
+          title: "Solicitação de saque criada",
+          description: `Saque de R$ ${validatedData.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX foi solicitado e está pendente de processamento.`,
+          type: "INFO",
+          priority: "MEDIUM",
+          url: `/financeiro/saques/${withdrawal.id}`,
+          metadata: {
+            withdrawalId: withdrawal.id,
+            amount: validatedData.amount,
+            method: validatedData.method
+          }
+        }
+      })
+
+      // 6. Audit entry
+      await tx.auditEntry.create({
+        data: {
+          actorUserId: user.id,
+          entity: "Withdrawal",
+          entityId: withdrawal.id,
+          action: "CREATE",
+          after: {
+            id: withdrawal.id,
+            amount: validatedData.amount,
+            method: validatedData.method,
+            status: "PENDING"
+          },
+          reason: "Solicitação de saque via API"
+        }
+      })
+
+      // 7. Domain event
+      await tx.domainEvent.create({
+        data: {
+          actorUserId: user.id,
+          eventName: "WITHDRAWAL_REQUESTED",
+          payload: {
+            withdrawalId: withdrawal.id,
+            userId: user.id,
+            amount: validatedData.amount,
+            method: validatedData.method,
+            pixKey: validatedData.pixKey
+          }
+        }
+      })
+
+      // 8. System log
+      await tx.systemLog.create({
+        data: {
+          actorUserId: user.id,
+          level: "INFO",
+          service: "withdrawals",
+          category: "request",
+          message: `Saque solicitado: R$ ${validatedData.amount} via ${validatedData.method}`,
+          context: {
+            withdrawalId: withdrawal.id,
+            amount: validatedData.amount,
+            method: validatedData.method,
+            pixKey: validatedData.pixKey
+          }
+        }
+      })
+
+      return { withdrawal, transaction, statement, updatedBalance }
     })
 
-    return NextResponse.json(withdrawal, { status: 201 })
+    return NextResponse.json({
+      withdrawal: result.withdrawal,
+      transaction: result.transaction,
+      balance: {
+        available: Number(result.updatedBalance.available),
+        pending: Number(result.updatedBalance.pending),
+        blocked: Number(result.updatedBalance.blocked)
+      },
+      message: "Saque solicitado com sucesso"
+    }, { status: 201 })
+
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Dados inválidos", details: error.errors }, { status: 400 })
@@ -165,3 +301,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Erro interno" }, { status: 500 })
   }
 }
+

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { apiClient } from "@/lib/api-client"
 
 interface DashboardStats {
@@ -47,37 +47,60 @@ export function useDashboardData() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [notifications, setNotifications] = useState<Notification[]>([])
-  const [loading, setLoading] = useState(true)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)  // Novo: loading apenas inicial
+  const [isRefreshing, setIsRefreshing] = useState(false)       // Novo: refetch em background
   const [error, setError] = useState<string | null>(null)
 
-  const fetchingRef = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
+  const isFirstFetch = useRef(true)  // Rastreia se é a primeira carga
 
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
     }
   }, [])
 
-  const fetchDashboardData = async (signal?: AbortSignal) => {
-    if (fetchingRef.current) return
-    fetchingRef.current = true
+  const fetchDashboardData = useCallback(async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     try {
-      setLoading(true)
-      setError(null)
+      if (!mountedRef.current) return
+
+      // Define estados de loading/refresh com base se é inicial ou refetch
+      if (isFirstFetch.current) {
+        setIsInitialLoading(true)
+        setError(null)
+      } else {
+        setIsRefreshing(true)  // Refetch: não esconde conteúdo, só indica atualização
+      }
 
       const [analyticsRes, transactionsRes, notificationsRes] = await Promise.all([
-        apiClient.get<AnalyticsResponse>("/api/analytics/dashboard", { signal }),
+        apiClient.get<AnalyticsResponse>("/api/analytics/dashboard", { signal: controller.signal }),
         apiClient.get<TransactionsResponse>("/api/transactions", {
-          signal,
+          signal: controller.signal,
           params: { limit: 10, sortBy: "createdAt", sortOrder: "desc" },
         }),
         apiClient.get<NotificationsResponse>("/api/notifications", {
-          signal,
+          signal: controller.signal,
           params: { limit: 10, unreadFirst: true },
         }),
       ])
+
+      if (controller.signal.aborted || !mountedRef.current) return
 
       const analyticsData = (analyticsRes as any)?.data ?? analyticsRes
       const transactionsData = (transactionsRes as any)?.data ?? transactionsRes
@@ -101,83 +124,83 @@ export function useDashboardData() {
         },
       }
 
-      if (signal?.aborted || !mountedRef.current) return
-
+      // Atualiza estados (causa re-render apenas nos valores mudados)
       setStats(dashboardStats)
-      setTransactions(
-        Array.isArray(transactionsData?.data) ? transactionsData.data : (transactionsData ?? [])
-      )
-      setNotifications(
-        Array.isArray(notificationsData?.data) ? notificationsData.data : (notificationsData ?? [])
-      )
+      setTransactions(Array.isArray(transactionsData?.data) ? transactionsData.data : (transactionsData ?? []))
+      setNotifications(Array.isArray(notificationsData?.data) ? notificationsData.data : (notificationsData ?? []))
+
+      isFirstFetch.current = false  // Marca como não-inicial após primeira carga
     } catch (err: any) {
-      if (err?.name === "CanceledError" || err?.message === "canceled" || err?.code === "ERR_CANCELED") {
-        // ignore aborted
+      if (
+        err?.name === "AbortError" ||
+        err?.name === "CanceledError" ||
+        err?.message?.includes("aborted") ||
+        err?.code === "ERR_CANCELED"
+      ) {
+        console.log("[v0] Request cancelado - ignorando erro")
         return
       }
+
       console.error("[v0] Dashboard data fetch error:", err)
       if (mountedRef.current) {
         setError(err instanceof Error ? err.message : "Erro ao carregar dados")
       }
     } finally {
-      fetchingRef.current = false
-      if (mountedRef.current) setLoading(false)
+      if (mountedRef.current) {
+        setIsInitialLoading(false)
+        setIsRefreshing(false)
+      }
     }
-  }
+  }, [])
 
-  const refetch = () => {
-    const controller = new AbortController()
-    void fetchDashboardData(controller.signal)
-    return () => controller.abort()
-  }
+  const refetch = useCallback(() => {
+    fetchDashboardData()
+  }, [fetchDashboardData])
 
   const markNotificationAsRead = async (notificationId: string) => {
     const prev = notifications
-    setNotifications(prev => prev.map(n => (n.id === notificationId ? { ...n, read: true } : n)))
+    setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n)))
     try {
       await apiClient.put(`/api/notifications/${notificationId}/read`)
     } catch (err) {
       console.error("[v0] Mark notification as read error:", err)
-      // rollback
       setNotifications(prev)
     }
   }
 
   const markAllNotificationsAsRead = async () => {
     const prev = notifications
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
     try {
       await apiClient.put("/api/notifications/read-all")
     } catch (err) {
       console.error("[v0] Mark all notifications as read error:", err)
-      // rollback
       setNotifications(prev)
     }
   }
 
   useEffect(() => {
-    const controller = new AbortController()
-    void fetchDashboardData(controller.signal)
+    fetchDashboardData()
 
-    const interval = setInterval(() => {
-      if (!controller.signal.aborted) {
-        const loopController = new AbortController()
-        void fetchDashboardData(loopController.signal)
+    intervalRef.current = setInterval(() => {
+      if (mountedRef.current) {
+        fetchDashboardData()
       }
-    }, 30000)
+    }, 5000)
 
     return () => {
-      controller.abort()
-      clearInterval(interval)
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [fetchDashboardData])
 
   return {
     stats,
     transactions,
     notifications,
-    loading,
+    isInitialLoading,  // Use isso no UI para loading inicial
+    isRefreshing,      // Use para indicador sutil de atualização
     error,
     refetch,
     markNotificationAsRead,

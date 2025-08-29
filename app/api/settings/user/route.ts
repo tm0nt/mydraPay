@@ -48,6 +48,21 @@ const webhookSchema = z.object({
   events: z.array(z.enum(WEBHOOK_EVENTS)),
 });
 
+// NOVOS SCHEMAS PARA DELETE
+const deleteIpSchema = z.object({
+  action: z.literal("deleteIp"),
+  ipId: z.string().uuid(),
+});
+
+const deleteWebhookSchema = z.object({
+  action: z.literal("deleteWebhook"),
+  webhookId: z.string().uuid(),
+});
+
+const deleteCredentialSchema = z.object({
+  action: z.literal("deleteCredential"),
+});
+
 /* ------------------------  GET – USER CONFIG ENDPOINT ----------------------- */
 
 export async function GET() {
@@ -136,7 +151,88 @@ export async function PUT(request: Request) {
   }
 }
 
+/* -------------------------  DELETE – REMOVER RECURSOS --------------------- */
+
+export async function DELETE(request: Request) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  }
+
+  try {
+    const body: unknown = await request.json();
+    const user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user) {
+      return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
+    }
+
+    /* ---------- Deletar IP Permitido ---------- */
+    const deleteIpParse = deleteIpSchema.safeParse(body);
+    if (deleteIpParse.success) {
+      const { ipId } = deleteIpParse.data;
+      
+      // Verificar se o IP pertence ao usuário
+      const allowedIp = await prisma.allowedIp.findFirst({
+        where: { id: ipId, userId: user.id },
+      });
+
+      if (!allowedIp) {
+        return NextResponse.json({ error: "IP não encontrado" }, { status: 404 });
+      }
+
+      await prisma.allowedIp.delete({ where: { id: ipId } });
+      
+      return NextResponse.json({ message: "IP removido com sucesso" });
+    }
+
+    /* ---------- Deletar Webhook ---------- */
+    const deleteWebhookParse = deleteWebhookSchema.safeParse(body);
+    if (deleteWebhookParse.success) {
+      const { webhookId } = deleteWebhookParse.data;
+      
+      // Verificar se o webhook pertence ao usuário
+      const webhook = await prisma.webhookUser.findFirst({
+        where: { id: webhookId, userId: user.id },
+      });
+
+      if (!webhook) {
+        return NextResponse.json({ error: "Webhook não encontrado" }, { status: 404 });
+      }
+
+      await prisma.webhookUser.delete({ where: { id: webhookId } });
+      
+      return NextResponse.json({ message: "Webhook removido com sucesso" });
+    }
+
+    /* ---------- Deletar Credencial API ---------- */
+    const deleteCredentialParse = deleteCredentialSchema.safeParse(body);
+    if (deleteCredentialParse.success) {
+      // Verificar se existe credencial do usuário
+      const credential = await prisma.credential.findFirst({
+        where: { userId: user.id },
+      });
+
+      if (!credential) {
+        return NextResponse.json({ error: "Credencial não encontrada" }, { status: 404 });
+      }
+
+      await prisma.credential.delete({ where: { id: credential.id } });
+      
+      return NextResponse.json({ message: "Credencial removida com sucesso" });
+    }
+
+    return NextResponse.json({ error: "Ação não reconhecida" }, { status: 400 });
+
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: "Dados inválidos", details: err.errors }, { status: 400 });
+    }
+    console.error("Erro ao deletar recurso:", err);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+  }
+}
+
 /* -----------------------------  TYPE EXPORTS ------------------------------- */
-/*  Opcional: exporte para reutilizar no front.                                */
+
 export type { WebhookEvent };
 export { WEBHOOK_EVENTS };

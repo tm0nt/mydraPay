@@ -88,16 +88,16 @@ export async function GET(request: Request) {
       prisma.transaction.count({ where }),
     ]);
 
-    // Calcular estatísticas separadas por tipo
+    // Calcular estatísticas separadas por tipo, apenas para status COMPLETED
     const incomingStats = await prisma.transaction.aggregate({
-      where: { ...where, type: "INCOMING" },
+      where: { ...where, type: "INCOMING", status: "COMPLETED" },
       _sum: {
         amount: true,
       },
     });
 
     const outgoingStats = await prisma.transaction.aggregate({
-      where: { ...where, type: "OUTGOING" },
+      where: { ...where, type: "OUTGOING", status: "COMPLETED" },
       _sum: {
         amount: true,
       },
