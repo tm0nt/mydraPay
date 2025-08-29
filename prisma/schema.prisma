@@ -172,6 +172,8 @@ model User {
   canGeneratePix Boolean @default(false)
   canWithdraw    Boolean @default(false)
   kycApproved    Boolean @default(false)
+    passwordResetToken     String?   @unique
+  passwordResetExpiresAt DateTime?
 
   kycs              Kyc[]
   credential        Credential?
