@@ -1,6 +1,5 @@
 // prisma/seed.js
 const { PrismaClient } = require('@prisma/client');
-
 const prisma = new PrismaClient();
 
 async function main() {
@@ -8,8 +7,8 @@ async function main() {
     data: {
       minPixWithdrawal: 10.00,
       minCryptoWithdrawal: 50.00,
-      minCryptoWithdrawalTax: 10,
-      minPixWithdrawalTax: 10,
+      minPixWithdrawalTax: 10.00,
+      minCryptoWithdrawalTax: 10.00,
       pixFeePercent: 1.50,
       pixFeeFixed: 0.50,
       creditFeePercent: 3.00,
@@ -18,14 +17,18 @@ async function main() {
       reserveFixed: 0.00,
       siteName: 'MydraPay',
       siteUrl: 'app.mydrapay.com',
-      pixAcquirerId: null, // Pode ser configurado depois
-      creditAcquirerId: null, // Pode ser configurado depois
-      cryptoAcquirerId: null, // Pode ser configurado depois
+      pixAcquirerId: null,
+      creditAcquirerId: null,
+      cryptoAcquirerId: null,
       siteLogoUrl: '/logo-mydra.png',
-      faviconUrl: '/favicon.ico', // Valor gerado; ajuste se necessário
+      faviconUrl: '/favicon.ico',
       seoDefaultTitle: 'MydraPay - Gateway de Pagamentos Seguro e Eficiente',
       seoDefaultDescription: 'MydraPay é um gateway de pagamentos confiável que oferece soluções seguras para transações via PIX, cartão de crédito e criptomoedas. Integre facilmente ao seu negócio e processe pagamentos com rapidez e baixa taxa.',
       seoDefaultKeywords: 'gateway de pagamentos, PIX, cartão de crédito, pagamentos com cripto, transações seguras, processamento de pagamentos online',
+      contactEmail: null, // Pode ser configurado depois
+      whatsappNumber: null, // Pode ser configurado depois
+      whatsappGroupLink: null, // Pode ser configurado depois
+      version: 1, // Valor default no schema
       flags: {} // Pode adicionar flags personalizadas aqui se necessário
     },
   });
@@ -40,3 +43,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+

@@ -14,7 +14,6 @@ export async function GET(request: Request) {
       where: { email: session.user.email },
       select: { id: true },
     });
-
     if (!user) {
       return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
@@ -22,53 +21,70 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "week";
 
-    // Calcular data inicial
     const now = new Date();
-    let startDate: Date;
-    let groupBy: string;
-    let dateFormat: string;
+    let startDate: Date, endDate: Date, sqlInterval: string, dateTruncUnit: string, labelSql: string;
+    endDate = new Date(now);
+    endDate.setHours(23, 59, 59, 999);
 
     switch (period) {
       case "week":
         startDate = new Date(now);
-        startDate.setDate(startDate.getDate() - 6); // Últimos 7 dias
-        groupBy = "day"; // Agrupar por dia
-        dateFormat = "EEE"; // Seg, Ter, etc.
+        startDate.setDate(now.getDate() - 6);
+        startDate.setHours(0, 0, 0, 0);
+        sqlInterval = "1 day";
+        dateTruncUnit = "day";
+        labelSql = "'Dy'";
         break;
       case "month":
         startDate = new Date(now);
-        startDate.setDate(1); // Início do mês atual
-        startDate.setMonth(startDate.getMonth() - 1); // Mês anterior para incluir ~30 dias
-        groupBy = "week"; // Agrupar por semana (Sem 1, Sem 2, etc.)
-        dateFormat = "'Sem 'W"; // Sem 1, Sem 2, etc.
+        startDate.setDate(1);
+        startDate.setMonth(startDate.getMonth() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        sqlInterval = "1 week";
+        dateTruncUnit = "week";
+        labelSql = "'Sem 'W'";
         break;
       case "year":
         startDate = new Date(now);
-        startDate.setMonth(0, 1); // Início do ano
-        startDate.setFullYear(startDate.getFullYear() - 1); // Ano anterior para incluir 12 meses
-        groupBy = "month"; // Agrupar por mês (Jan, Fev, etc.)
-        dateFormat = "MMM"; // Jan, Fev, etc.
+        startDate.setMonth(0, 1);
+        startDate.setFullYear(now.getFullYear() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        sqlInterval = "1 month";
+        dateTruncUnit = "month";
+        labelSql = "'Mon'";
         break;
       default:
         return NextResponse.json({ error: "Período inválido" }, { status: 400 });
     }
 
-    // Consulta raw com date_trunc para agrupamento
-    const aggregates = await prisma.$queryRaw`
+    const rows = await prisma.$queryRawUnsafe(
+      `
       SELECT
-        to_char(date_trunc(${groupBy}, t."createdAt"), ${dateFormat}) AS name,
-        COALESCE(SUM(CASE WHEN t.type = 'INCOMING' THEN t.amount ELSE 0 END), 0) AS entradas,
-        COALESCE(SUM(CASE WHEN t.type = 'OUTGOING' THEN t.amount ELSE 0 END), 0) AS saidas,
-        date_trunc(${groupBy}, t."createdAt") AS truncated
-      FROM "Transaction" t
-      WHERE t."userId" = ${user.id}
+        to_char(d::date, ${labelSql}) AS name,
+        COALESCE(SUM(CASE WHEN t.type = 'INCOMING' THEN t.amount ELSE 0 END), 0)::int AS entradas,
+        COALESCE(SUM(CASE WHEN t.type = 'OUTGOING' THEN t.amount ELSE 0 END), 0)::int AS saidas,
+        d::date
+      FROM
+        generate_series($1::date, $2::date, INTERVAL '${sqlInterval}') d
+      LEFT JOIN "Transaction" t
+        ON date_trunc('${dateTruncUnit}', t."createdAt") = d::date
+        AND t."userId" = $3
         AND t.status = 'COMPLETED'
-        AND t."createdAt" >= ${startDate}
-      GROUP BY truncated, name
-      ORDER BY truncated ASC;
-    ` as Array<{ name: string; entradas: number; saidas: number; truncated: Date }>;
+      GROUP BY d
+      ORDER BY d ASC;
+      `,
+      startDate,
+      endDate,
+      user.id
+    );
 
-    return NextResponse.json(aggregates);
+    const data = rows.map((row: any) => ({
+      name: row.name,
+      Entradas: Number(row.entradas),
+      Saidas: Number(row.saidas),
+    }));
+
+    return NextResponse.json(data);
   } catch (error) {
     console.error("Erro ao obter dados de billing:", error);
     return NextResponse.json({ error: "Erro interno" }, { status: 500 });

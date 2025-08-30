@@ -227,28 +227,86 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
     }
 
-    // Verificar restrições de campos
-    if (user.taxId && body.taxId) {
-      return NextResponse.json({ error: "CPF/CNPJ não pode ser alterado após cadastro" }, { status: 403 });
-    }
-    if (user.phone && body.phone) {
-      return NextResponse.json({ error: "Telefone não pode ser alterado após cadastro" }, { status: 403 });
+    // 🔒 VALIDAÇÕES DE RESTRIÇÕES - Campos que não podem ser alterados após preenchimento
+    if (user.taxId && body.taxId && user.taxId !== body.taxId) {
+      return NextResponse.json({ 
+        error: "CPF/CNPJ não pode ser alterado após o primeiro cadastro" 
+      }, { status: 403 });
     }
 
-    // Monta objeto de atualização
+    if (user.phone && body.phone && user.phone !== body.phone) {
+      return NextResponse.json({ 
+        error: "Telefone não pode ser alterado após o primeiro cadastro" 
+      }, { status: 403 });
+    }
+
+    // 🔍 VALIDAÇÕES DE DUPLICIDADE - Verificar se outros usuários já usam os dados
+    if (body.taxId && !user.taxId) {
+      const existingUserWithTaxId = await prisma.user.findFirst({
+        where: { 
+          taxId: body.taxId,
+          id: { not: user.id }
+        }
+      });
+
+      if (existingUserWithTaxId) {
+        return NextResponse.json({ 
+          error: "Este CPF/CNPJ já está em uso por outro usuário" 
+        }, { status: 409 });
+      }
+    }
+
+    if (body.phone && !user.phone) {
+      const existingUserWithPhone = await prisma.user.findFirst({
+        where: { 
+          phone: body.phone,
+          id: { not: user.id }
+        }
+      });
+
+      if (existingUserWithPhone) {
+        return NextResponse.json({ 
+          error: "Este telefone já está em uso por outro usuário" 
+        }, { status: 409 });
+      }
+    }
+
+    // ✏️ CONSTRUIR DADOS PARA ATUALIZAÇÃO - Só atualiza campos que realmente mudaram
     const updateData: any = {};
-    if (body.name) updateData.name = body.name;
-    if (body.phone) updateData.phone = body.phone;
-    if (body.taxId) updateData.taxId = body.taxId;
+    
+    if (body.name && body.name.trim() !== user.name) {
+      updateData.name = body.name.trim();
+    }
+    
+    if (body.phone && !user.phone) {
+      updateData.phone = body.phone.trim();
+    }
+    
+    if (body.taxId && !user.taxId) {
+      updateData.taxId = body.taxId.replace(/\D/g, ""); // Remove formatação
+    }
 
-    // Guarda antes e depois para auditoria
-    const before = { name: user.name, phone: user.phone, taxId: user.taxId };
+    // Se não há nada para atualizar
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ 
+        message: "Nenhuma alteração detectada" 
+      });
+    }
+
+    // Guardar dados antes da atualização para auditoria
+    const before = { 
+      name: user.name, 
+      phone: user.phone, 
+      taxId: user.taxId 
+    };
+
+    // 💾 EXECUTAR ATUALIZAÇÃO
     const updated = await prisma.user.update({
       where: { id: user.id },
       data: updateData,
     });
 
-    // AUDIT: registra edit no AuditEntry
+    // 📝 REGISTRAR AUDITORIA
     await prisma.auditEntry.create({
       data: {
         actorUserId: user.id,
@@ -256,14 +314,59 @@ export async function PUT(request: Request) {
         entityId: user.id,
         action: "UPDATE",
         before,
-        after: { name: updated.name, phone: updated.phone, taxId: updated.taxId },
+        after: { 
+          name: updated.name, 
+          phone: updated.phone, 
+          taxId: updated.taxId 
+        },
         reason: "Atualização de perfil via PUT",
       },
     });
 
-    return NextResponse.json({ message: "Perfil atualizado com sucesso" });
-  } catch (error) {
+    return NextResponse.json({ 
+      message: "Perfil atualizado com sucesso" 
+    });
+
+  } catch (error: any) {
     console.error("Erro ao atualizar perfil:", error);
-    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 });
+
+    // 🚨 TRATAMENTO ESPECÍFICO DE ERROS PRISMA
+    if (error.code === "P2002") {
+      // Violação de unique constraint
+      const target = error.meta?.target;
+      
+      if (target?.includes("taxId")) {
+        return NextResponse.json({ 
+          error: "Este CPF/CNPJ já está cadastrado no sistema" 
+        }, { status: 409 });
+      }
+      
+      if (target?.includes("phone")) {
+        return NextResponse.json({ 
+          error: "Este telefone já está cadastrado no sistema" 
+        }, { status: 409 });
+      }
+
+      if (target?.includes("email")) {
+        return NextResponse.json({ 
+          error: "Este e-mail já está cadastrado no sistema" 
+        }, { status: 409 });
+      }
+
+      return NextResponse.json({ 
+        error: "Dados já existem no sistema" 
+      }, { status: 409 });
+    }
+
+    if (error.code === "P2025") {
+      // Record not found
+      return NextResponse.json({ 
+        error: "Usuário não encontrado" 
+      }, { status: 404 });
+    }
+
+    return NextResponse.json({ 
+      error: "Erro interno do servidor" 
+    }, { status: 500 });
   }
 }

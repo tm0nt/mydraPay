@@ -130,9 +130,6 @@ export function BillingChart() {
     <div className="w-full space-y-6">
       {/* Controles */}
       <div className="flex items-center gap-3">
-        <div className="p-2 bg-purple-600/20 rounded-xl backdrop-blur-sm border border-purple-500/30">
-          <Calendar className="w-4 h-4 text-purple-400" />
-        </div>
         <div className="flex gap-1 bg-gray-900/50 backdrop-blur-sm rounded-2xl p-1 border border-gray-700/50">
           {(["week", "month", "year"] as const).map((p) => (
             <Button
@@ -168,26 +165,6 @@ export function BillingChart() {
             <span className="text-xs text-gray-400 font-medium">Total Saídas</span>
           </div>
           <p className="text-lg font-bold text-white">R$ {totalSaidas.toLocaleString("pt-BR")}</p>
-        </div>
-
-        <div className="bg-gradient-to-r from-green-900/20 to-green-800/20 backdrop-blur-sm border border-green-700/30 rounded-2xl p-4">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            <span className="text-xs text-gray-400 font-medium">Lucro Líquido</span>
-          </div>
-          <p className={`text-lg font-bold ${lucroLiquido > 0 ? "text-green-400" : "text-red-400"}`}>
-            R$ {lucroLiquido.toLocaleString("pt-BR")}
-          </p>
-        </div>
-
-        <div className="bg-gradient-to-r from-blue-900/20 to-blue-800/20 backdrop-blur-sm border border-blue-700/30 rounded-2xl p-4">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-            <span className="text-xs text-gray-400 font-medium">Crescimento</span>
-          </div>
-          <p className={`text-lg font-bold text-blue-400`}>
-            +{((lucroLiquido / totalSaidas) * 100).toFixed(1)}%  {/* Exemplo de cálculo; ajuste conforme necessário */}
-          </p>
         </div>
       </div>
 

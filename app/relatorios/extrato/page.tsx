@@ -45,6 +45,7 @@ export default function ExtratosPage() {
 
   const [statements, setStatements] = useState<any[]>([]);
   const [currentBalance, setCurrentBalance] = useState(0);
+  const [totalTransacoesCompleted, setTotalTransacoesCompleted] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +82,7 @@ export default function ExtratosPage() {
 
       setStatements(mapped);
       setCurrentBalance(Number(data.currentBalance ?? 0));
+      setTotalTransacoesCompleted(Number(data.totalTransacoesCompleted ?? 0));
       setPagination(data.pagination);
     } catch (err) {
       setError("Erro ao carregar extratos");

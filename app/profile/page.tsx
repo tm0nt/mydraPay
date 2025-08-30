@@ -29,6 +29,7 @@ function formatCPF(v: string) {
   if (d.length <= 9) return d.replace(/^(\d{3})(\d{3})(\d{0,3})$/, "$1.$2.$3");
   return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{0,2}).*$/, "$1.$2.$3-$4");
 }
+
 function formatCNPJ(v: string) {
   const d = v.replace(/\D/g, "").slice(0, 14);
   if (d.length <= 2) return d;
@@ -36,6 +37,45 @@ function formatCNPJ(v: string) {
   if (d.length <= 8) return d.replace(/^(\d{2})(\d{3})(\d{0,3})$/, "$1.$2.$3");
   if (d.length <= 12) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{0,4})$/, "$1.$2.$3/$4");
   return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*$/, "$1.$2.$3/$4-$5");
+}
+
+// FUNÇÃO PARA CALCULAR PROGRESSO DO PERFIL
+function calculateProfileProgress(form: any, kycApproved: boolean, hasSavedTaxId: boolean): number {
+  let completedFields = 0;
+  let totalFields = 0;
+  
+  // Campos básicos obrigatórios (peso: 1 cada)
+  const requiredFields = [
+    { field: 'name', weight: 1 },
+    { field: 'email', weight: 1 },
+    { field: 'phone', weight: 1 }
+  ];
+  
+  requiredFields.forEach(({ field, weight }) => {
+    totalFields += weight;
+    if (form[field] && form[field].toString().trim().length > 0) {
+      completedFields += weight;
+    }
+  });
+  
+  // TaxId (documento) - peso: 2
+  totalFields += 2;
+  if (hasSavedTaxId && form.taxId && form.taxId.toString().trim().length > 0) {
+    const minLength = form.type === "BUSINESS" ? 14 : 11;
+    if (form.taxId.replace(/\D/g, "").length >= minLength) {
+      completedFields += 2;
+    }
+  }
+  
+  // KYC aprovado - peso: 3 (mais importante)
+  totalFields += 3;
+  if (kycApproved) {
+    completedFields += 3;
+  }
+  
+  // Calcular porcentagem
+  const percentage = totalFields > 0 ? Math.round((completedFields / totalFields) * 100) : 0;
+  return Math.min(percentage, 100); // Garantir máximo de 100%
 }
 
 export default function ProfilePage() {
@@ -78,6 +118,11 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // CALCULAR PROGRESSO DO PERFIL DINAMICAMENTE
+  const profileProgress = useMemo(() => {
+    return calculateProfileProgress(form, kycApproved, hasSavedTaxId);
+  }, [form, kycApproved, hasSavedTaxId]);
 
   // Stats usando dados do store
   const stats = useMemo(() => {
@@ -349,12 +394,27 @@ export default function ProfilePage() {
                       )}
                     </div>
 
+                    {/* PROGRESSO DINÂMICO */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-gray-400">Perfil Completo</span>
-                        <span className="text-white font-medium">85%</span>
+                        <span className="text-white font-medium">{profileProgress}%</span>
                       </div>
-                      <Progress value={85} className="h-2 bg-gray-800" />
+                      <Progress 
+                        value={profileProgress} 
+                        className="h-2 bg-gray-800" 
+                      />
+                      <div className="text-xs text-gray-500 text-center">
+                        {profileProgress < 100 && (
+                          <>
+                            {!form.name && "• Complete seu nome "}
+                            {!form.phone && "• Adicione seu telefone "}
+                            {!hasSavedTaxId && "• Confirme seu documento "}
+                            {!kycApproved && "• Envie seu KYC "}
+                          </>
+                        )}
+                        {profileProgress === 100 && "✓ Perfil 100% completo!"}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-800/50">

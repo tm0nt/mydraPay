@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mydra
+      POSTGRES_USER: mydra
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://mydra:${DB_PASSWORD}@db:5432/mydra?schema=public
+      - AUTH_SECRET=${AUTH_SECRET}
+      - NEXT_PUBLIC_API_URL=https://app.mydrapay.com
+      - NEXTAUTH_URL=https://app.mydrapay.com
+      - EMAIL_USER=suporte@mydrapay.com
+      - EMAIL_PASS=${EMAIL_PASS}
+      - EMAIL_FROM=suporte@mydrapay.com
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
